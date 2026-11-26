@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>LINEで空き案内を受け取る</title>
+<style>
+body{margin:0;color:#19332e;background:#edf3f1;font:16px/1.6 sans-serif}
+header{background:#123c36;color:white;padding:16px}
+main{max-width:420px;margin:16px auto;padding:16px;background:white;border-radius:12px}
+h1{font-size:21px;margin:0}
+button{border:0;border-radius:8px;background:#17634f;color:white;padding:12px;width:100%;font:inherit}
+button:disabled{opacity:.6}
+small{color:#49655d}
+</style>
+</head>
+<body>
+<header>千早並木通りひろ歯科クリニック</header>
+<main>
+  <h1>キャンセル待ちのご案内</h1>
+  <p>このLINEで空き案内を受け取りますか？</p>
+  <p id="summary" hidden></p>
+  <p id="status" role="status">LINEを確認しています。</p>
+  <p><a id="friend-link" target="_blank" rel="noopener noreferrer" hidden>公式LINEを友だちに追加</a></p>
+  <button id="accept" type="button" disabled>このLINEで受け取る</button>
+  <p><small>※このLINEは送信専用です。</small></p>
+  <section id="stop" hidden>
+    <p>キャンセル待ちの空き案内をやめますか？（受付への連絡はいりません）</p>
+    <button id="stop-send" type="button">キャンセル待ちをやめる</button>
+    <p><small>同じLINEで受け取っているご家族の分もまとめて終わります。また待ちたい時は受付でお申し付けください。</small></p>
+  </section>
+  <form id="stop-form" method="post" target="_top" hidden>
+    <input type="hidden" name="action" value="stop">
+    <input type="hidden" name="choice">
+    <input type="hidden" name="idToken">
+  </form>
+  <form id="callback" method="post" target="_top" hidden>
+    <input type="hidden" name="action" value="liff">
+    <input type="hidden" name="key">
+    <input type="hidden" name="idToken">
+    <input type="hidden" name="accessToken">
+  </form>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script type="text/javascript">
+'use strict';
+// 公開先で設定する。この2つは公開識別子で、アクセストークンは置かない。
+const LIFF_ID = '';
+const APPS_SCRIPT_URL = '';
+const status = document.getElementById('status');
+const accept = document.getElementById('accept');
+
+async function main() {
+  if (!/^[0-9]+-[A-Za-z0-9]+$/.test(LIFF_ID) ||
+      !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(APPS_SCRIPT_URL)) {
+    throw new Error('受付に設定を確認してください。');
+  }
+  await liff.init({liffId: LIFF_ID});
+  const params = new URLSearchParams(location.search);
+  if (params.get('mode') === 'stop') return stopMode();
+  const key = params.get('key');
+  const official = params.get('official');
+  if (!/^[0-9a-f-]{36}$/.test(key || '') || !/^@[A-Za-z0-9_.-]+$/.test(official || '')) throw new Error('受付で新しいQRをお受け取りください。');
+  if (!liff.isLoggedIn()) {
+    liff.login({redirectUri: location.href});
+    return;
+  }
+  const summary = params.get('summary');
+  const validSummary = /^[月火水木金土]{1,6}／(?:午前|午後|どちらでも)／(?:メンテ・検診|Dr処置|自費)／\d{4}-\d{2}-\d{2}$/;
+  if (summary && validSummary.test(summary)) {
+    const [days, period, service, expiry] = summary.split('／');
+    const line = document.getElementById('summary');
+    line.textContent = 'ご希望：' + days + '曜 ' + period + '／' + service + '・' + expiry + 'まで';
+    line.hidden = false;
+  }
+
+  async function checkFriendship() {
+    const friendship = await liff.getFriendship();
+    accept.disabled = !friendship.friendFlag;
+    const friendLink = document.getElementById('friend-link');
+    friendLink.href = 'https://line.me/R/ti/p/' + encodeURIComponent(official);
+    friendLink.hidden = friendship.friendFlag;
+    status.textContent = friendship.friendFlag
+      ? '確認できました。下のボタンを押してください。'
+      : '医院の公式LINEを友だちに追加し、この画面に戻ってください。';
+  }
+  await checkFriendship();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkFriendship().catch(() => {
+      status.textContent = 'LINEを確認できませんでした。受付にお知らせください。';
+    });
+  });
+  accept.addEventListener('click', async () => {
+    accept.disabled = true;
+    status.textContent = '受付へ確認を送っています。';
+    const idToken = liff.getIDToken();
+    const accessToken = liff.getAccessToken();
+    if (!idToken || !accessToken) {
+      status.textContent = 'LINEを確認できませんでした。受付にお知らせください。';
+      return;
+    }
+    const form = document.getElementById('callback');
+    form.action = APPS_SCRIPT_URL;
+    form.elements.namedItem('key').value = key;
+    form.elements.namedItem('idToken').value = idToken;
+    form.elements.namedItem('accessToken').value = accessToken;
+    form.submit();
+  });
+}
+
+// 案内のLINEのリンクから開いたとき：患者さんが自分でやめる。
+function stopMode() {
+  if (!liff.isLoggedIn()) {
+    liff.login({redirectUri: location.href});
+    return;
+  }
+  document.querySelector('h1').textContent = 'キャンセル待ちをやめる';
+  for (const node of [document.querySelector('main > p'), accept]) node.hidden = true;
+  status.textContent = '';
+  const box = document.getElementById('stop');
+  const send = document.getElementById('stop-send');
+  box.hidden = false;
+  send.addEventListener('click', () => {
+    const idToken = liff.getIDToken();
+    if (!idToken) {
+      status.textContent = 'LINEを確認できませんでした。お電話でお知らせください。';
+      return;
+    }
+    send.disabled = true;
+    const form = document.getElementById('stop-form');
+    form.action = APPS_SCRIPT_URL;
+    form.elements.namedItem('choice').value = 'end';
+    form.elements.namedItem('idToken').value = idToken;
+    form.submit();
+  });
+}
+
+main().catch(error => {
+  status.textContent = error.message === '受付に設定を確認してください。' ? error.message :
+    'LINEを開けませんでした。受付でQRを確認してください。';
+});
+</script>
+</body>
+</html>
