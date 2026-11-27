@@ -67,11 +67,12 @@ async function main() {
     return;
   }
   const summary = params.get('summary');
-  const validSummary = /^(?:[月火水木金土]{1,6}|\d{1,2}\/\d{1,2}(?:・\d{1,2}\/\d{1,2}){0,9})／(?:午前|午後|16時以降|どちらでも)／(?:メンテ・検診|Dr処置|自費|子供の治療|子供の検診)／\d{4}-\d{2}-\d{2}$/;
+  const validSummary = /^(?:[月火水木金土]{1,6}|\d{1,2}\/\d{1,2}(?:・\d{1,2}\/\d{1,2}){0,9})／(?:午前|午後|16時以降|どちらでも|\d{2}:\d{2}-\d{2}:\d{2})／(?:メンテ・検診|Dr処置|自費|子供の治療|子供の検診)／\d{4}-\d{2}-\d{2}$/;
   if (summary && validSummary.test(summary)) {
     const [days, period, service, expiry] = summary.split('／');
+    const time = /^\d/.test(period) ? period.replace(/^0/, '').replace('-0', '-').replace('-', '〜') : period;
     const line = document.getElementById('summary');
-    line.textContent = 'ご希望：' + days + (days.includes('/') ? 'の ' : '曜 ') + period + '／' + service + '・' + expiry + 'まで';
+    line.textContent = 'ご希望：' + days + (days.includes('/') ? 'の ' : '曜 ') + time + '／' + service + '・' + expiry + 'まで';
     line.hidden = false;
   }
 
